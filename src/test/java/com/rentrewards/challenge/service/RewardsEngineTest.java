@@ -135,11 +135,31 @@ class RewardsEngineTest {
         assertEquals(3000, member.getPointsForMonth(YearMonth.of(2026, 3)));
     }
 
+    @Test
+    void remembersCappedEventsWhenRetriedAfterOtherEvents() {
+        MemberAccount member = new MemberAccount("member-1", 0);
+        PaymentEvent first = new PaymentEvent("evt-1", "member-1",
+                new BigDecimal("100000"), false, LocalDate.of(2026, 3, 1));
+        PaymentEvent capped = new PaymentEvent("evt-2", "member-1",
+                new BigDecimal("50"), false, LocalDate.of(2026, 3, 2));
+        PaymentEvent nextMonth = new PaymentEvent("evt-3", "member-1",
+                new BigDecimal("1000"), false, LocalDate.of(2026, 4, 1));
+
+        engine.processPayment(first, member);
+        assertEquals(ProcessingOutcome.CAPPED, engine.processPayment(capped, member).getOutcome());
+        engine.processPayment(nextMonth, member);
+        PointsResult retry = engine.processPayment(capped, member);
+
+        assertEquals(ProcessingOutcome.DUPLICATE, retry.getOutcome());
+        assertEquals(0, retry.getPointsAwarded());
+        assertEquals(100_000, member.getPointsForMonth(YearMonth.of(2026, 3)));
+        assertEquals(1000, member.getPointsForMonth(YearMonth.of(2026, 4)));
+    }
+
     @RepeatedTest(8)
     void awardsPointsAtMostOnceWhenTheSameEventArrivesConcurrently() throws Exception {
         int workerCount = 16;
-        RewardsEngine concurrentEngine = new RewardsEngine(
-                new PointsCalculator(), new ProcessedEventStore());
+        ProcessedEventStore sharedStore = new ProcessedEventStore();
         MemberAccount member = new MemberAccount("member-1", 0);
         PaymentEvent event = new PaymentEvent(
                 "evt-concurrent",
@@ -154,6 +174,7 @@ class RewardsEngineTest {
         try {
             List<Future<PointsResult>> futures = new ArrayList<>();
             for (int worker = 0; worker < workerCount; worker++) {
+                RewardsEngine concurrentEngine = new RewardsEngine(new PointsCalculator(), sharedStore);
                 futures.add(executor.submit(() -> {
                     ready.countDown();
                     start.await();
@@ -166,8 +187,13 @@ class RewardsEngineTest {
 
             long awardedResults = 0;
             for (Future<PointsResult> future : futures) {
-                if (future.get(2, TimeUnit.SECONDS).getOutcome() == ProcessingOutcome.AWARDED) {
+                PointsResult result = future.get(2, TimeUnit.SECONDS);
+                if (result.getOutcome() == ProcessingOutcome.AWARDED) {
                     awardedResults++;
+                    assertEquals(1500, result.getPointsAwarded());
+                } else {
+                    assertEquals(ProcessingOutcome.DUPLICATE, result.getOutcome());
+                    assertEquals(0, result.getPointsAwarded());
                 }
             }
 

@@ -28,6 +28,8 @@ test("shows a duplicate event as skipped rather than credited", () => {
 
   assert.equal(view.title, "Duplicate event skipped");
   assert.equal(view.tone, "neutral");
+  assert.match(view.description, /already received/);
+  assert.match(view.description, /No additional points were credited/);
 });
 
 test("shows when the member has reached the monthly cap", () => {
@@ -38,5 +40,18 @@ test("shows when the member has reached the monthly cap", () => {
 
   assert.equal(view.title, "Monthly cap reached");
   assert.equal(view.tone, "warning");
+  assert.match(view.description, /No points were credited/);
+  assert.match(view.description, /monthly points cap/);
+  assert.equal(view.progressPercent, 100);
+});
+
+test("shows an award that fills the monthly cap as successful", () => {
+  const view = buildViewModel(
+    { pointsAwarded: 500, outcome: "AWARDED" },
+    { ...member, pointsThisMonth: 100_000 },
+  );
+
+  assert.equal(view.title, "500 points credited");
+  assert.equal(view.tone, "success");
   assert.equal(view.progressPercent, 100);
 });

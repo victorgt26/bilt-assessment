@@ -10,11 +10,11 @@ import java.time.YearMonth;
 /**
  * Orchestrates the processing of an incoming payment webhook event:
  *
- *  1. Ignore the event if it is a duplicate delivery.
+ *  1. Claim the event, ignoring it if already claimed.
  *  2. Calculate base points (with linked-account multiplier).
  *  3. Apply streak bonus if the member is eligible.
  *  4. Enforce the monthly points cap per member.
- *  5. Record the points and mark the event as processed.
+ *  5. Record the points.
  */
 public class RewardsEngine {
 
@@ -29,7 +29,7 @@ public class RewardsEngine {
     }
 
     public PointsResult processPayment(PaymentEvent event, MemberAccount member) {
-        if (processedEventStore.isDuplicate(event.getEventId())) {
+        if (!processedEventStore.claim(event.getEventId())) {
             return new PointsResult(member.getMemberId(), 0, ProcessingOutcome.DUPLICATE);
         }
 
@@ -43,7 +43,6 @@ public class RewardsEngine {
         long pointsToAward = Math.min(pointsWithBonus, remainingCap);
 
         member.addPointsForMonth(month, pointsToAward);
-        processedEventStore.markProcessed(event.getEventId());
 
         ProcessingOutcome outcome = pointsToAward == 0
                 ? ProcessingOutcome.CAPPED
